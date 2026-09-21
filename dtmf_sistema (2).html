@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema DTMF — Generador y Detector</title>
+<style>
+:root{
+  --bg0:#070b18; --bg1:#0d1428; --neon:#38f9d7; --neon2:#4facfe;
+  --amber:#ffcf6b; --danger:#ff5f7e; --glass:rgba(255,255,255,.06);
+  --stroke:rgba(255,255,255,.12); --txt:#e8f0ff; --muted:#8ea2c7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  color:var(--txt); overflow-x:hidden;
+  background:radial-gradient(1200px 800px at 15% -10%,#15224a 0%,transparent 55%),
+             radial-gradient(1000px 700px at 110% 20%,#123a3a 0%,transparent 50%),
+             linear-gradient(160deg,var(--bg0),var(--bg1));
+  min-height:100vh; padding:28px 16px 60px;
+}
+/* animated grid backdrop */
+.bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(56,249,215,.06) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(79,172,254,.06) 1px,transparent 1px);
+  background-size:44px 44px; mask-image:radial-gradient(circle at 50% 30%,#000 0%,transparent 75%);
+  animation:drift 18s linear infinite;}
+@keyframes drift{from{background-position:0 0,0 0}to{background-position:44px 88px,88px 44px}}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto}
+header{text-align:center;margin-bottom:26px}
+header h1{font-size:clamp(28px,5vw,44px);letter-spacing:2px;font-weight:800;
+  background:linear-gradient(90deg,var(--neon),var(--neon2));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 30px rgba(56,249,215,.25)}
+header p{color:var(--muted);margin-top:8px;font-size:15px;letter-spacing:.5px}
+/* tabs */
+.tabs{display:flex;gap:10px;justify-content:center;margin:22px 0 26px;flex-wrap:wrap}
+.tab{padding:12px 22px;border-radius:14px;border:1px solid var(--stroke);
+  background:var(--glass);color:var(--muted);cursor:pointer;font-weight:600;
+  font-size:14px;letter-spacing:.5px;transition:.25s;backdrop-filter:blur(8px)}
+.tab:hover{color:var(--txt);border-color:var(--neon2)}
+.tab.active{color:#031018;background:linear-gradient(90deg,var(--neon),var(--neon2));
+  box-shadow:0 8px 30px rgba(56,249,215,.35);border-color:transparent}
+.panel{display:none;animation:fade .4s ease}
+.panel.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:var(--glass);border:1px solid var(--stroke);border-radius:22px;
+  padding:24px;backdrop-filter:blur(14px);box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.card h2{font-size:15px;letter-spacing:2px;color:var(--neon);text-transform:uppercase;
+  margin-bottom:18px;font-weight:700;display:flex;align-items:center;gap:10px}
+.card h2::before{content:'';width:8px;height:18px;border-radius:3px;
+  background:linear-gradient(var(--neon),var(--neon2))}
+/* LCD screen */
+.lcd{position:relative;border-radius:16px;padding:20px 22px;min-height:110px;
+  background:linear-gradient(180deg,#04140f,#02100c);border:1px solid rgba(56,249,215,.3);
+  box-shadow:inset 0 0 40px rgba(56,249,215,.12),0 0 0 4px rgba(0,0,0,.4);
+  overflow:hidden}
+.lcd::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 2px,transparent 2px 4px)}
+.lcd .label{font-size:11px;letter-spacing:3px;color:rgba(56,249,215,.6);text-transform:uppercase}
+.lcd .value{font-family:'Courier New',monospace;font-size:34px;font-weight:700;
+  letter-spacing:4px;color:var(--neon);text-shadow:0 0 14px rgba(56,249,215,.7);
+  margin-top:8px;min-height:42px;word-break:break-all}
+.lcd .cursor{display:inline-block;width:16px;color:var(--neon);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.lcd .sub{font-family:'Courier New',monospace;font-size:12px;color:rgba(56,249,215,.55);margin-top:6px}
+/* keypad */
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
+.key{position:relative;aspect-ratio:1/1;border-radius:18px;border:1px solid var(--stroke);
+  background:linear-gradient(160deg,rgba(255,255,255,.09),rgba(255,255,255,.02));
+  color:var(--txt);font-size:26px;font-weight:700;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:transform .08s,box-shadow .2s,border-color .2s;user-select:none}
+.key small{font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:2px;font-weight:600}
+.key:hover{border-color:var(--neon2);box-shadow:0 6px 24px rgba(79,172,254,.25)}
+.key:active,.key.hit{transform:scale(.93);border-color:var(--neon);
+  background:linear-gradient(160deg,rgba(56,249,215,.35),rgba(79,172,254,.15));
+  box-shadow:0 0 26px rgba(56,249,215,.55)}
+.key .ring{position:absolute;inset:0;border-radius:18px;pointer-events:none}
+.key.hit .ring{animation:ripple .5s ease-out}
+@keyframes ripple{from{box-shadow:0 0 0 0 rgba(56,249,215,.5)}to{box-shadow:0 0 0 22px rgba(56,249,215,0)}}
+/* controls */
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.btn{flex:1;min-width:120px;padding:13px 16px;border-radius:14px;border:none;cursor:pointer;
+  font-weight:700;font-size:14px;letter-spacing:.5px;transition:.2s;color:#04121a;
+  background:linear-gradient(90deg,var(--neon),var(--neon2));box-shadow:0 8px 26px rgba(56,249,215,.3)}
+.btn:hover{filter:brightness(1.1);transform:translateY(-2px)}
+.btn.ghost{background:var(--glass);color:var(--txt);border:1px solid var(--stroke);box-shadow:none}
+.btn.warn{background:linear-gradient(90deg,#ff8a5b,var(--amber));box-shadow:0 8px 26px rgba(255,207,107,.25)}
+.btn.stop{background:linear-gradient(90deg,#ff5f7e,#ff8a9c);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
+.field{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--stroke);
+  background:rgba(0,0,0,.3);color:var(--txt);font-size:16px;letter-spacing:2px;
+  font-family:'Courier New',monospace;margin-top:4px}
+.field:focus{outline:none;border-color:var(--neon)}
+.hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
+/* freq badges */
+.freqs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;justify-content:center}
+.fb{font-size:11px;font-family:'Courier New',monospace;padding:6px 11px;border-radius:20px;
+  border:1px solid var(--stroke);color:var(--muted);background:rgba(0,0,0,.25);transition:.2s}
+.fb.on{color:#04121a;background:linear-gradient(90deg,var(--neon),var(--neon2));
+  border-color:transparent;box-shadow:0 0 16px rgba(56,249,215,.5);transform:scale(1.08)}
+/* spectrum */
+canvas{width:100%;border-radius:14px;background:rgba(0,0,0,.35);border:1px solid var(--stroke);display:block}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:12px;letter-spacing:1px;
+  color:var(--muted);margin-top:12px}
+.dot{width:10px;height:10px;border-radius:50%;background:#555;transition:.3s}
+.dot.live{background:var(--neon);box-shadow:0 0 12px var(--neon);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.4}}
+.detected{font-family:'Courier New',monospace;font-size:15px;color:var(--txt);
+  background:rgba(0,0,0,.3);border-radius:12px;padding:12px 14px;margin-top:14px;
+  min-height:46px;max-height:140px;overflow-y:auto;border:1px solid var(--stroke)}
+.detected .line{padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
+.detected .k{color:var(--neon);font-weight:700}
+.matrix{display:grid;grid-template-columns:auto repeat(3,1fr);gap:6px;margin-top:14px;font-size:12px;
+  font-family:'Courier New',monospace}
+.mcell{padding:8px 4px;text-align:center;border-radius:8px;background:rgba(0,0,0,.25);
+  border:1px solid var(--stroke);color:var(--muted);transition:.15s}
+.mcell.hdr{color:var(--neon2);background:transparent;border:none}
+.mcell.act{color:#04121a;background:var(--neon);border-color:transparent;
+  box-shadow:0 0 14px rgba(56,249,215,.6);font-weight:700}
+/* owner banner */
+.owner{margin-top:16px;border-radius:16px;padding:18px 20px;text-align:center;
+  border:1px solid var(--stroke);background:rgba(0,0,0,.3);transition:.3s}
+.owner .lab{font-size:11px;letter-spacing:3px;color:var(--muted);text-transform:uppercase}
+.owner .who{font-size:28px;font-weight:800;margin-top:6px;color:var(--muted);letter-spacing:1px}
+.owner .num{font-family:'Courier New',monospace;font-size:13px;color:var(--muted);margin-top:4px}
+.owner.hit{border-color:transparent;background:linear-gradient(120deg,rgba(56,249,215,.22),rgba(79,172,254,.18));
+  box-shadow:0 0 34px rgba(56,249,215,.4);animation:pop .5s ease}
+.owner.hit .who{color:var(--neon);text-shadow:0 0 18px rgba(56,249,215,.6)}
+.owner.miss{border-color:rgba(255,95,126,.5);background:rgba(255,95,126,.08)}
+.owner.miss .who{color:var(--danger);font-size:20px}
+@keyframes pop{0%{transform:scale(.9)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+/* directory */
+.dir-row{display:grid;grid-template-columns:1.1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center}
+.dir-row input{padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);
+  background:rgba(0,0,0,.3);color:var(--txt);font-size:14px;font-family:'Courier New',monospace}
+.dir-row input:focus{outline:none;border-color:var(--neon)}
+.dir-row input.name{letter-spacing:.5px}
+.dir-del{width:40px;height:40px;border-radius:10px;border:1px solid var(--stroke);cursor:pointer;
+  background:rgba(255,95,126,.12);color:var(--danger);font-size:16px;font-weight:700}
+.dir-del:hover{background:rgba(255,95,126,.25)}
+.dir-row.match input{border-color:var(--neon);box-shadow:0 0 12px rgba(56,249,215,.3)}
+.dir-head{display:grid;grid-template-columns:1.1fr 1fr auto;gap:8px;margin-bottom:8px;
+  font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+.pbitem{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  background:rgba(0,0,0,.28);border:1px solid var(--stroke);border-radius:12px;padding:10px 12px}
+.pbitem .pn{font-family:'Courier New',monospace;font-size:14px;color:var(--neon);font-weight:700;letter-spacing:1px}
+.pbitem .pw{font-size:13px;color:var(--txt)}
+.pbitem .pinfo{overflow:hidden}
+.pbitem .pinfo>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pbitem .del{flex:0 0 auto;width:28px;height:28px;border-radius:8px;border:1px solid rgba(255,95,126,.4);
+  background:rgba(255,95,126,.12);color:var(--danger);cursor:pointer;font-size:14px;font-weight:700;line-height:1}
+.pbitem .del:hover{background:rgba(255,95,126,.25)}
+.pbitem.flash{border-color:var(--neon);box-shadow:0 0 18px rgba(56,249,215,.5)}
+</style>
+</head>
+<body>
+<div class="bgfx"></div>
+<div class="wrap">
+<header>
+  <h1>SISTEMA DTMF</h1>
+  <p>Generador &amp; Detector de tonos telefónicos · Web Audio API</p>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="gen">🔊 Generar &amp; Reproducir</div>
+  <div class="tab" data-tab="det">🎤 Detectar por Micrófono</div>
+</div>
+
+<!-- ===== GENERAR ===== -->
+<div class="panel active" id="gen">
+<div class="grid">
+  <div class="card">
+    <h2>Marcador</h2>
+    <div class="lcd">
+      <div class="label">Número marcado</div>
+      <div class="value" id="lcdVal"><span class="cursor">_</span></div>
+      <div class="sub" id="lcdSub">Listo para marcar</div>
+    </div>
+    <div class="freqs" id="genFreqs">
+      <span class="fb" data-f="697">697 Hz</span>
+      <span class="fb" data-f="770">770 Hz</span>
+      <span class="fb" data-f="852">852 Hz</span>
+      <span class="fb" data-f="941">941 Hz</span>
+      <span class="fb" data-f="1209">1209 Hz</span>
+      <span class="fb" data-f="1336">1336 Hz</span>
+      <span class="fb" data-f="1477">1477 Hz</span>
+    </div>
+    <div class="keypad" id="keypad"></div>
+  </div>
+
+  <div class="card">
+    <h2>Reproducción automática</h2>
+    <div class="label" style="font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase">Escribe el número a marcar</div>
+    <input class="field" id="seq" placeholder="ej. 73249938" value="73249938">
+    <div class="row">
+      <button class="btn" id="playSeq">▶ Reproducir</button>
+      <button class="btn ghost" id="clearGen">✕ Borrar pantalla</button>
+    </div>
+    <canvas id="waveCv" height="150"></canvas>
+    <div class="hint">Cada tecla combina una frecuencia de <b>fila</b> y una de <b>columna</b> (estándar DTMF). Toca el teclado o escribe una secuencia y presiona <b>Reproducir</b>. Sube el volumen 🔈 para escuchar los tonos.</div>
+  </div>
+</div>
+</div>
+
+<!-- ===== DETECTAR ===== -->
+<div class="panel" id="det">
+<div class="grid">
+  <div class="card">
+    <h2>Detector en vivo</h2>
+    <div class="lcd">
+      <div class="label">Tecla detectada</div>
+      <div class="value" id="detBig">—</div>
+      <div class="sub" id="detFreqTxt">Esperando tono...</div>
+    </div>
+    <div class="matrix" id="matrix"></div>
+    <div class="owner" id="owner">
+      <div class="lab">Propietario del número</div>
+      <div class="who" id="ownerName">—</div>
+      <div class="num" id="ownerNum">Esperando un número completo...</div>
+    </div>
+    <div class="status"><span class="dot" id="micDot"></span><span id="micStat">Micrófono inactivo</span></div>
+    <div class="row">
+      <button class="btn warn" id="startMic">● Iniciar micrófono</button>
+      <button class="btn stop" id="stopMic" disabled>■ Detener</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Espectro de frecuencia</h2>
+    <canvas id="specCv" height="180"></canvas>
+    <div class="lcd" style="margin-top:14px;min-height:auto">
+      <div class="label">Secuencia detectada</div>
+      <div class="value" id="detSeq" style="font-size:26px"><span class="cursor">_</span></div>
+    </div>
+    <div class="detected" id="detLog"></div>
+    <div class="row"><button class="btn ghost" id="clearDet">✕ Limpiar</button></div>
+    <div class="hint">Reproduce tonos DTMF desde otro teléfono o desde la pestaña <b>Generar</b> en otro dispositivo. El detector analiza el espectro (FFT) y busca los picos en las 7 frecuencias DTMF.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:22px">
+  <h2>Directorio de números → propietario</h2>
+  <p class="hint" style="margin-top:0">Registra a quién pertenece cada número. Cuando el detector complete un número (tras una breve pausa), buscará aquí y mostrará el propietario. Los datos se guardan en este navegador.</p>
+  <div class="row" style="align-items:flex-end">
+    <div style="flex:1;min-width:150px">
+      <div class="label" style="font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase">Número</div>
+      <input class="field" id="pbNum" placeholder="73249938">
+    </div>
+    <div style="flex:1;min-width:150px">
+      <div class="label" style="font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase">Propietario</div>
+      <input class="field" id="pbName" placeholder="Torrico" style="letter-spacing:1px">
+    </div>
+    <button class="btn" id="pbAdd" style="flex:0 0 auto;min-width:120px">+ Agregar</button>
+  </div>
+  <div id="pbList" style="margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px"></div>
+</div>
+</div>
+</div>
+<script>
+/* ---------- DTMF data ---------- */
+const FR=[697,770,852,941];      // filas
+const FC=[1209,1336,1477];       // columnas
+const KEYS=[['1','2','3'],['4','5','6'],['7','8','9'],['*','0','#']];
+const DUR=0.32;                  // duracion tono (s)
+const GAP=0.10;                  // pausa entre teclas
+let AC=null;
+function ctx(){ if(!AC) AC=new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==='suspended')AC.resume(); return AC; }
+function freqOf(ch){for(let i=0;i<4;i++)for(let j=0;j<3;j++)if(KEYS[i][j]===ch)return[FR[i],FC[j],i,j];return null;}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById(t.dataset.tab).classList.add('active');
+  /* recalcular lienzos al mostrar el panel (evita ancho 0 en canvas ocultos) */
+  requestAnimationFrame(()=>{if(typeof fitCanvas==='function'){fitCanvas(waveCv);fitCanvas(specCv);baseWave();}});
+});
+
+/* ---------- GENERATE ---------- */
+const lcdVal=document.getElementById('lcdVal'), lcdSub=document.getElementById('lcdSub');
+const genFreqs=[...document.querySelectorAll('#genFreqs .fb')];
+let dialed='';
+function renderLcd(){ lcdVal.innerHTML = (dialed||'') + '<span class="cursor">_</span>'; }
+function flashFreq(f1,f2){
+  genFreqs.forEach(b=>b.classList.toggle('on', +b.dataset.f===f1||+b.dataset.f===f2));
+  clearTimeout(flashFreq._t);
+  flashFreq._t=setTimeout(()=>genFreqs.forEach(b=>b.classList.remove('on')), DUR*1000);
+}
+/* play a single tone; returns a Promise resolving when finished */
+function playTone(f1,f2,dur=DUR,visual=true){
+  return new Promise(res=>{
+    const c=ctx(), t0=c.currentTime;
+    const g=c.createGain();
+    g.gain.setValueAtTime(0,t0);
+    g.gain.linearRampToValueAtTime(0.42,t0+0.012);
+    g.gain.setValueAtTime(0.42,t0+dur-0.03);
+    g.gain.linearRampToValueAtTime(0,t0+dur);
+    g.connect(c.destination);
+    [f1,f2].forEach(f=>{const o=c.createOscillator();o.type='sine';o.frequency.value=f;o.connect(g);o.start(t0);o.stop(t0+dur);});
+    if(visual){flashFreq(f1,f2);drawWave(f1,f2,dur);}
+    setTimeout(res,dur*1000);
+  });
+}
+/* build keypad */
+const kp=document.getElementById('keypad');
+KEYS.flat().forEach(ch=>{
+  const [f1,f2]=freqOf(ch);
+  const el=document.createElement('div');
+  el.className='key'; el.innerHTML=`${ch}<small>${f1}·${f2}</small><span class="ring"></span>`;
+  el.onclick=()=>{
+    el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'),450);
+    dialed+=ch; renderLcd(); lcdSub.textContent=`${ch}  →  ${f1} Hz + ${f2} Hz`;
+    playTone(f1,f2);
+  };
+  kp.appendChild(el);
+});
+renderLcd();
+document.getElementById('clearGen').onclick=()=>{dialed='';renderLcd();lcdSub.textContent='Listo para marcar';};
+/* play typed sequence */
+document.getElementById('playSeq').onclick=async()=>{
+  const s=document.getElementById('seq').value.trim();
+  if(!s)return;
+  dialed=''; renderLcd();
+  for(const ch of s){
+    const fr=freqOf(ch);
+    if(!fr){lcdSub.textContent=`"${ch}" no válido, se omite`; await new Promise(r=>setTimeout(r,120)); continue;}
+    dialed+=ch; renderLcd(); lcdSub.textContent=`${ch}  →  ${fr[0]} Hz + ${fr[1]} Hz`;
+    const key=[...kp.children][fr[2]*3+fr[3]]; key.classList.add('hit');
+    await playTone(fr[0],fr[1]);
+    key.classList.remove('hit');
+    await new Promise(r=>setTimeout(r,GAP*1000));
+  }
+  lcdSub.textContent='Reproducción completa ✔';
+};
+/* ---------- waveform canvas (generate) ---------- */
+const waveCv=document.getElementById('waveCv'), wctx=waveCv.getContext('2d');
+function fitCanvas(cv){if(!cv.dataset.bh)cv.dataset.bh=cv.height;const r=cv.getBoundingClientRect();cv.width=r.width*devicePixelRatio;cv.height=cv.dataset.bh*devicePixelRatio;}
+fitCanvas(waveCv);
+function drawWave(f1,f2,dur){
+  const W=waveCv.width,H=waveCv.height,c=wctx; let start=performance.now();
+  function frame(now){
+    const p=(now-start)/(dur*1000); if(p>1){c.clearRect(0,0,W,H);baseWave();return;}
+    c.clearRect(0,0,W,H);
+    const g=c.createLinearGradient(0,0,W,0); g.addColorStop(0,'#38f9d7');g.addColorStop(1,'#4facfe');
+    c.strokeStyle=g;c.lineWidth=2*devicePixelRatio;c.beginPath();
+    for(let x=0;x<W;x++){const t=x/W*0.02;
+      const y=H/2+(Math.sin(2*Math.PI*f1*t)+Math.sin(2*Math.PI*f2*t))*H*0.2;
+      x?c.lineTo(x,y):c.moveTo(x,y);}
+    c.stroke();
+    c.shadowBlur=18*devicePixelRatio;c.shadowColor='#38f9d7';c.stroke();c.shadowBlur=0;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+function baseWave(){const W=waveCv.width,H=waveCv.height,c=wctx;c.clearRect(0,0,W,H);
+  c.strokeStyle='rgba(142,162,199,.25)';c.lineWidth=1.5*devicePixelRatio;c.beginPath();c.moveTo(0,H/2);c.lineTo(W,H/2);c.stroke();}
+baseWave();
+
+/* ---------- DETECT (microphone) ---------- */
+const specCv=document.getElementById('specCv'), sctx=specCv.getContext('2d');
+fitCanvas(specCv);
+const detBig=document.getElementById('detBig'), detFreqTxt=document.getElementById('detFreqTxt');
+const detSeqEl=document.getElementById('detSeq'), detLog=document.getElementById('detLog');
+const micDot=document.getElementById('micDot'), micStat=document.getElementById('micStat');
+let micStream=null, anal=null, rafId=null, detSeq='';
+let candidate='', confirm=0, toneActive=false;
+let lastActivity=0, finalized=true;   // control de "número completo"
+const ownerEl=document.getElementById('owner'), ownerName=document.getElementById('ownerName'), ownerNum=document.getElementById('ownerNum');
+
+/* ---------- Directorio (número -> propietario) ---------- */
+const PB_KEY='dtmf_phonebook_v1';
+let phonebook={};
+try{phonebook=JSON.parse(localStorage.getItem(PB_KEY))||null;}catch(e){phonebook=null;}
+if(!phonebook){phonebook={'73249938':'Torrico'};savePb();}
+function savePb(){try{localStorage.setItem(PB_KEY,JSON.stringify(phonebook));}catch(e){}}
+const pbList=document.getElementById('pbList');
+function renderPb(){
+  const keys=Object.keys(phonebook);
+  if(!keys.length){pbList.innerHTML='<div class="hint" style="margin:0">Sin registros aún.</div>';return;}
+  pbList.innerHTML='';
+  keys.forEach(num=>{
+    const el=document.createElement('div');el.className='pbitem';el.dataset.num=num;
+    el.innerHTML=`<div class="pinfo"><div class="pn">${num}</div><div class="pw">${phonebook[num]}</div></div><button class="del" title="Eliminar">✕</button>`;
+    el.querySelector('.del').onclick=()=>{delete phonebook[num];savePb();renderPb();};
+    pbList.appendChild(el);
+  });
+}
+renderPb();
+document.getElementById('pbAdd').onclick=()=>{
+  const num=document.getElementById('pbNum').value.replace(/[^0-9*#]/g,'').trim();
+  const name=document.getElementById('pbName').value.trim();
+  if(!num||!name){return;}
+  phonebook[num]=name;savePb();renderPb();
+  document.getElementById('pbNum').value='';document.getElementById('pbName').value='';
+};
+function flashPb(num){const el=pbList.querySelector(`.pbitem[data-num="${num}"]`);if(el){el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1600);el.scrollIntoView({block:'nearest'});}}
+
+/* Finaliza el número actual y busca al propietario */
+function finalizeNumber(){
+  finalized=true;
+  const num=detSeq;
+  if(!num)return;
+  const name=phonebook[num];
+  if(name){
+    ownerEl.className='owner hit';
+    ownerName.textContent=name;
+    ownerNum.textContent='Número: '+num;
+    flashPb(num);
+    const l=document.createElement('div');l.className='line';
+    l.innerHTML=`✅ <span class="k">${num}</span> pertenece a <b>${name}</b>`;
+    detLog.prepend(l);
+  }else{
+    ownerEl.className='owner miss';
+    ownerName.textContent='No registrado';
+    ownerNum.textContent='Número: '+num;
+    const l=document.createElement('div');l.className='line';
+    l.innerHTML=`⚠️ <span class="k">${num}</span> no está en el directorio`;
+    detLog.prepend(l);
+  }
+  /* preparar para el siguiente número */
+  detSeq=''; detSeqEl.innerHTML='<span class="cursor">_</span>';
+}
+
+/* matrix display */
+const mx=document.getElementById('matrix');
+function buildMatrix(){
+  mx.innerHTML='<div class="mcell hdr"></div>'+FC.map(f=>`<div class="mcell hdr">${f}</div>`).join('');
+  FR.forEach((fr,i)=>{mx.innerHTML+=`<div class="mcell hdr">${fr}</div>`+FC.map((fc,j)=>`<div class="mcell" data-i="${i}" data-j="${j}">${KEYS[i][j]}</div>`).join('');});
+}
+buildMatrix();
+function lightMatrix(i,j){mx.querySelectorAll('.mcell[data-i]').forEach(c=>c.classList.toggle('act', +c.dataset.i===i&&+c.dataset.j===j));}
+
+document.getElementById('startMic').onclick=async()=>{
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  }catch(e){micStat.textContent='No se pudo acceder al micrófono';return;}
+  const c=ctx(); const src=c.createMediaStreamSource(micStream);
+  anal=c.createAnalyser(); anal.fftSize=4096; anal.smoothingTimeConstant=0.15;
+  src.connect(anal);
+  fitCanvas(specCv);   // asegurar tamaño real del lienzo al iniciar
+  micDot.classList.add('live'); micStat.textContent='Escuchando... reproduce tonos DTMF';
+  document.getElementById('startMic').disabled=true; document.getElementById('stopMic').disabled=false;
+  candidate='';confirm=0;toneActive=false;
+  finalized=true;lastActivity=0;
+  loopDetect();
+};
+document.getElementById('stopMic').onclick=stopMic;
+function stopMic(){
+  if(rafId)cancelAnimationFrame(rafId);
+  if(micStream)micStream.getTracks().forEach(t=>t.stop());
+  micStream=null;anal=null;
+  micDot.classList.remove('live');micStat.textContent='Micrófono inactivo';
+  document.getElementById('startMic').disabled=false;document.getElementById('stopMic').disabled=true;
+  lightMatrix(-1,-1);
+}
+document.getElementById('clearDet').onclick=()=>{detSeq='';detSeqEl.innerHTML='<span class="cursor">_</span>';detLog.innerHTML='';detBig.textContent='—';detFreqTxt.textContent='Esperando tono...';ownerEl.className='owner';ownerName.textContent='—';ownerNum.textContent='Esperando un número completo...';finalized=true;};
+
+function loopDetect(){
+  rafId=requestAnimationFrame(loopDetect);
+  if(!anal)return;
+  const N=anal.frequencyBinCount;
+  const freqData=new Float32Array(N);
+  anal.getFloatFrequencyData(freqData);      // dB
+  const sr=ctx().sampleRate, binHz=sr/anal.fftSize;
+  drawSpectrum(freqData,binHz);
+  /* peak per DTMF freq (search +-3 bins) */
+  function peak(f){const k=Math.round(f/binHz);let m=-Infinity;for(let b=k-3;b<=k+3;b++){if(b>=0&&b<N&&freqData[b]>m)m=freqData[b];}return m;}
+  const rowE=FR.map(peak), colE=FC.map(peak);
+  const rSorted=[...rowE].sort((a,b)=>b-a), cSorted=[...colE].sort((a,b)=>b-a);
+  let ri=rowE.indexOf(rSorted[0]), ci=colE.indexOf(cSorted[0]);
+  /* overall reference level */
+  let maxAll=-Infinity;for(let b=0;b<N;b++)if(freqData[b]>maxAll)maxAll=freqData[b];
+  const strong = rSorted[0]>-58 && cSorted[0]>-58;                 // presence
+  const contrastR = rSorted[0]-rSorted[1], contrastC = cSorted[0]-cSorted[1]; // dominance
+  if(!strong || contrastR<6 || contrastC<6){
+    confirm=0;candidate='';
+    if(toneActive){toneActive=false;}
+    /* silencio: si hay dígitos y pasó una pausa, cerrar el número */
+    if(!finalized && detSeq.length>0 && performance.now()-lastActivity>1100){
+      finalizeNumber();
+      detFreqTxt.textContent='Esperando el siguiente número...';
+    }
+    return;
+  }
+  const key=KEYS[ri][ci];
+  lightMatrix(ri,ci);
+  detFreqTxt.textContent=`${FR[ri]} Hz + ${FC[ci]} Hz`;
+  if(key===candidate)confirm++; else {candidate=key;confirm=1;}
+  if(confirm>=2 && !toneActive){
+    toneActive=true;
+    detSeq+=key; detSeqEl.innerHTML=detSeq+'<span class="cursor">_</span>';
+    detBig.textContent=key;
+    lastActivity=performance.now(); finalized=false;
+    const line=document.createElement('div');line.className='line';
+    line.innerHTML=`<span class="k">${key}</span> → ${FR[ri]} Hz + ${FC[ci]} Hz &nbsp;·&nbsp; total: ${detSeq}`;
+    detLog.prepend(line);
+    confirm=0;
+  }
+}
+function drawSpectrum(data,binHz){
+  const W=specCv.width,H=specCv.height,c=sctx;c.clearRect(0,0,W,H);
+  const maxF=1700, bins=Math.round(maxF/binHz);
+  const bw=W/bins;
+  for(let b=0;b<bins;b++){
+    const db=data[b]; const v=Math.max(0,(db+100)/100); // 0..1
+    const h=v*H;
+    const f=b*binHz;
+    const isD=FR.some(x=>Math.abs(x-f)<binHz*1.5)||FC.some(x=>Math.abs(x-f)<binHz*1.5);
+    c.fillStyle=isD?`rgba(56,249,215,${0.5+v*0.5})`:`rgba(79,172,254,${0.15+v*0.4})`;
+    c.fillRect(b*bw,H-h,bw*0.9,h);
+  }
+  /* mark DTMF freqs */
+  c.fillStyle='rgba(255,207,107,.9)';c.font=`${10*devicePixelRatio}px monospace`;
+  [...FR,...FC].forEach(f=>{const x=f/binHz*bw;c.fillRect(x,0,1*devicePixelRatio,H);});
+}
+window.addEventListener('resize',()=>{fitCanvas(waveCv);fitCanvas(specCv);baseWave();});
+</script>
+</body>
+</html>
